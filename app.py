@@ -1,133 +1,113 @@
-# StockMarketAnalyzerimport streamlit as st
+import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objs as go
-import ta
-import io
-from datetime import datetime
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import date
 
-st.set_page_config(page_title="📈 Stock Market Visualizer", layout="wide")
+# App Title
+st.title("Stock Market Visualizer with Enhanced Analytics")
+st.sidebar.title("Options")
 
-# Sidebar – Input section
-st.sidebar.title("Stock Selection")
-ticker = st.sidebar.text_input("Enter Stock Ticker (e.g., AAPL)", "AAPL")
-start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2022-01-01"))
-end_date = st.sidebar.date_input("End Date", datetime.today())
+# Helper Functions
+def fetch_stock_data(ticker, start_date, end_date):
+    """Fetch stock data using yfinance."""
+    stock = yf.Ticker(ticker)
+    return stock.history(start=start_date, end=end_date)
 
-# Timeframe for chart
-interval = st.sidebar.selectbox("Interval", ["1d", "1h", "15m"])
+def plot_candlestick(data):
+    """Plot a candlestick chart."""
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=data.index,
+        open=data['Open'],
+        high=data['High'],
+        low=data['Low'],
+        close=data['Close'],
+        name="Candlestick"
+    ))
+    fig.update_layout(title="Candlestick Chart", xaxis_title="Date", yaxis_title="Price", template="plotly_dark")
+    st.plotly_chart(fig)
 
-# Indicators
-show_ma = st.sidebar.checkbox("Show Moving Averages")
-show_rsi = st.sidebar.checkbox("Show RSI")
-show_boll = st.sidebar.checkbox("Show Bollinger Bands")
+def plot_volume(data):
+    """Plot a volume chart."""
+    fig = px.bar(data, x=data.index, y='Volume', title="Trading Volume", template="plotly_dark")
+    st.plotly_chart(fig)
 
-# Fetch Data
-@st.cache_data
-def load_data(ticker, start, end, interval):
-    data = yf.download(ticker, start=start, end=end, interval=interval)
-    data.dropna(inplace=True)
-    return data
+def plot_daily_returns(data):
+    """Plot daily returns."""
+    data['Daily Return'] = data['Close'].pct_change() * 100
+    fig = px.line(data, x=data.index, y='Daily Return', title="Daily Returns (%)", template="plotly_dark")
+    st.plotly_chart(fig)
 
-df = load_data(ticker, start_date, end_date, interval)
+def plot_cumulative_returns(data):
+    """Plot cumulative returns."""
+    data['Cumulative Return'] = (1 + data['Close'].pct_change()).cumprod() - 1
+    fig = px.line(data, x=data.index, y='Cumulative Return', title="Cumulative Returns", template="plotly_dark")
+    st.plotly_chart(fig)
 
-st.title("📊 Stock Market Visualizer")
-st.subheader(f"Showing data for {ticker.upper()}")
+def plot_moving_averages(data, windows):
+    """Plot moving averages."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name="Close Price"))
+    for window in windows:
+        data[f"MA{window}"] = data['Close'].rolling(window=window).mean()
+        fig.add_trace(go.Scatter(x=data.index, y=data[f"MA{window}"], mode='lines', name=f"MA {window}"))
+    fig.update_layout(title="Moving Averages", xaxis_title="Date", yaxis_title="Price", template="plotly_dark")
+    st.plotly_chart(fig)
 
-# Indicators
-if show_ma:
-    df["MA20"] = df["Close"].rolling(window=20).mean()
-    df["MA50"] = df["Close"].rolling(window=50).mean()
+def plot_correlation_matrix(data):
+    """Plot correlation matrix for stock portfolio."""
+    corr = data.corr()
+    fig = px.imshow(corr, title="Correlation Matrix", template="plotly_dark", text_auto=True, color_continuous_scale='RdBu_r')
+    st.plotly_chart(fig)
 
-if show_boll:
-    bb = ta.volatility.BollingerBands(df["Close"])
-    df["bb_upper"] = bb.bollinger_hband()
-    df["bb_lower"] = bb.bollinger_lband()
+# Inputs
+st.sidebar.header("Stock Selection")
+ticker = st.sidebar.text_input("Enter Stock Ticker (e.g., AAPL)", value="AAPL")
+start_date = st.sidebar.date_input("Start Date", value=date(2020, 1, 1))
+end_date = st.sidebar.date_input("End Date", value=date.today())
 
-# Candlestick Chart
-fig = go.Figure()
+data = fetch_stock_data(ticker, start_date, end_date)
 
-fig.add_trace(go.Candlestick(x=df.index,
-                             open=df['Open'],
-                             high=df['High'],
-                             low=df['Low'],
-                             close=df['Close'],
-                             name="Candlesticks"))
+# Visualizations
+if not data.empty:
+    st.subheader(f"Stock Data for {ticker}")
+    st.write(data.tail())
 
-if show_ma:
-    fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="MA 20", line=dict(width=1)))
-    fig.add_trace(go.Scatter(x=df.index, y=df["MA50"], name="MA 50", line=dict(width=1)))
+    # Candlestick Chart
+    st.subheader("Candlestick Chart")
+    plot_candlestick(data)
 
-if show_boll:
-    fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], name="Boll Upper", line=dict(width=1)))
-    fig.add_trace(go.Scatter(x=df.index, y=df["bb_lower"], name="Boll Lower", line=dict(width=1)))
+    # Volume Chart
+    st.subheader("Volume Chart")
+    plot_volume(data)
 
-fig.update_layout(title=f"{ticker.upper()} Price Chart", xaxis_rangeslider_visible=False)
+    # Daily Returns
+    st.subheader("Daily Returns")
+    plot_daily_returns(data)
 
-st.plotly_chart(fig, use_container_width=True)
+    # Cumulative Returns
+    st.subheader("Cumulative Returns")
+    plot_cumulative_returns(data)
 
-# RSI Chart
-if show_rsi:
-    df["RSI"] = ta.momentum.RSIIndicator(df["Close"]).rsi()
-    rsi_fig = go.Figure()
-    rsi_fig.add_trace(go.Scatter(x=df.index, y=df["RSI"], name="RSI"))
-    rsi_fig.add_hline(y=70, line_dash="dash", line_color="red")
-    rsi_fig.add_hline(y=30, line_dash="dash", line_color="green")
-    rsi_fig.update_layout(title="Relative Strength Index", height=300)
-    st.plotly_chart(rsi_fig, use_container_width=True)
+    # Moving Averages
+    st.sidebar.header("Moving Averages")
+    moving_averages = st.sidebar.multiselect("Select Moving Averages (days)", options=[10, 20, 50, 100, 200], default=[20, 50])
+    if moving_averages:
+        st.subheader("Moving Averages")
+        plot_moving_averages(data, moving_averages)
 
-# Export Chart
-st.sidebar.markdown("### Export Chart")
-export_format = st.sidebar.selectbox("Export format", ["PNG", "HTML"])
-if st.sidebar.button("Export"):
-    if export_format == "HTML":
-        buffer = io.StringIO()
-        fig.write_html(buffer)
-        st.download_button("Download HTML", buffer.getvalue(), file_name=f"{ticker}_chart.html")
-    elif export_format == "PNG":
-        fig.write_image("temp.png")
-        with open("temp.png", "rb") as f:
-            st.download_button("Download PNG", f, file_name=f"{ticker}_chart.png")
-
-# Portfolio Upload
-st.sidebar.markdown("### Upload Portfolio CSV or Excel")
-portfolio_file = st.sidebar.file_uploader("Upload file", type=["csv", "xlsx"])
-
+# Portfolio Correlation
+st.sidebar.header("Portfolio Analysis")
+portfolio_file = st.sidebar.file_uploader("Upload Portfolio (CSV or Excel)")
 if portfolio_file:
-    try:
-        if portfolio_file.name.endswith(".csv"):
-            portfolio_df = pd.read_csv(portfolio_file)
-        else:
-            portfolio_df = pd.read_excel(portfolio_file)
-        st.subheader("📁 Portfolio Data")
-        st.dataframe(portfolio_df)
+    portfolio = pd.read_csv(portfolio_file) if portfolio_file.name.endswith("csv") else pd.read_excel(portfolio_file)
+    tickers = portfolio['Ticker'].tolist()
+    st.subheader("Portfolio Data")
+    st.write(portfolio)
 
-        tickers = portfolio_df["Ticker"].unique()
-        st.write(f"Detected {len(tickers)} unique tickers.")
-    except Exception as e:
-        st.error(f"Could not load portfolio: {e}")
-
-# Save configuration
-st.sidebar.markdown("### Save/Load Configuration")
-save_config = st.sidebar.button("📥 Save Config")
-load_config = st.sidebar.file_uploader("📤 Load Config", type=["json"])
-
-if save_config:
-    config = {
-        "ticker": ticker,
-        "start_date": str(start_date),
-        "end_date": str(end_date),
-        "interval": interval,
-        "show_ma": show_ma,
-        "show_rsi": show_rsi,
-        "show_boll": show_boll
-    }
-    st.download_button("Download Config", data=pd.Series(config).to_json(), file_name="config.json")
-
-if load_config:
-    try:
-        config_df = pd.read_json(load_config)
-        st.success("Configuration loaded (refresh to apply changes).")
-        st.json(config_df.to_dict())
-    except Exception as e:
-        st.error(f"Failed to load configuration: {e}")
+    portfolio_data = {t: fetch_stock_data(t, start_date, end_date)['Close'] for t in tickers}
+    portfolio_df = pd.DataFrame(portfolio_data)
+    st.subheader("Correlation Matrix")
+    plot_correlation_matrix(portfolio_df)
